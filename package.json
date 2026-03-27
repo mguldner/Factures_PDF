@@ -1,0 +1,14 @@
+{
+  "name": "factures-pdf-csv",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "micro": "^10.0.1",
+    "openai": "^4.67.0",
+    "stripe": "^16.0.0"
+  }
+}
