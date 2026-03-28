@@ -130,6 +130,7 @@ function parseInvoiceText(text) {
 
   // ── Numéro de facture
   const numPatterns = [
+    /num[eé]ro\s+de\s+(?:la\s+)?facture\s*[:#]?\s*([A-Z0-9][-A-Z0-9]{1,25})/i,
     /(?:facture|invoice|fact\.?)\s*[n°n\xb0]\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,25})/i,
     /(?:n[°\xb0]|num[e\xe9]ro|r[e\xe9]f\.?)\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,20})/i,
     /\b(FA[-\s]?\d{3,12})\b/i,
@@ -142,7 +143,29 @@ function parseInvoiceText(text) {
   }
 
   // ── Date
+  const DATE_MONTH_RE = /janvier|janv\.?|f[e\xe9]vrier|f[e\xe9]v\.?|fev\.?|mars|avril|avr\.?|mai|juin|juillet|juil\.?|ao[u\xfb]t|septembre|sept\.?|octobre|oct\.?|novembre|nov\.?|d[e\xe9]cembre|d[e\xe9]c\.?/i;
+  const INVOICE_DATE_LABEL = /(?:date\s+de\s+(?:la\s+)?(?:la\s+)?facture|date\s+facture|invoice\s+date)[^0-9]*/i;
   const datePatterns = [
+    // Date de la facture avec label explicite + mois texte
+    {
+      re: new RegExp(INVOICE_DATE_LABEL.source + `(\\d{1,2})\\s+(${DATE_MONTH_RE.source})\\s+(\\d{4})`, 'i'),
+      fmt: (m) => {
+        const day = m[1].padStart(2, '0');
+        const month = FR_MONTHS[m[2].toLowerCase().replace('.', '')] || '01';
+        return `${day}/${month}/${m[3]}`;
+      },
+    },
+    // Date de la facture avec label explicite + format numérique
+    {
+      re: new RegExp(INVOICE_DATE_LABEL.source + `(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})`, 'i'),
+      fmt: (m) => `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}`,
+    },
+    // Date de la facture avec label explicite + format ISO
+    {
+      re: new RegExp(INVOICE_DATE_LABEL.source + `(\\d{4})[\\/\\-.](\\d{2})[\\/\\-.](\\d{2})`, 'i'),
+      fmt: (m) => `${m[3]}/${m[2]}/${m[1]}`,
+    },
+    // Fallback sans label : mois texte
     {
       re: /(\d{1,2})\s+(janvier|janv\.?|f[e\xe9]vrier|f[e\xe9]v\.?|fev\.?|mars|avril|avr\.?|mai|juin|juillet|juil\.?|ao[u\xfb]t|septembre|sept\.?|octobre|oct\.?|novembre|nov\.?|d[e\xe9]cembre|d[e\xe9]c\.?)\s+(\d{4})/i,
       fmt: (m) => {
@@ -151,10 +174,12 @@ function parseInvoiceText(text) {
         return `${day}/${month}/${m[3]}`;
       },
     },
+    // Fallback sans label : format numérique
     {
       re: /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/,
       fmt: (m) => `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}`,
     },
+    // Fallback sans label : format ISO
     {
       re: /(\d{4})[\/\-.](\d{2})[\/\-.](\d{2})/,
       fmt: (m) => `${m[3]}/${m[2]}/${m[1]}`,
@@ -172,7 +197,7 @@ function parseInvoiceText(text) {
   // ── Fournisseur
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const supplierPatterns = [
-    /(?:(?:de\s+)?chez|fournisseur|vendeur|[e\xe9]metteur|prestataire)\s*[:#]?\s*(.+)/i,
+    /(?:vendu\s+par|(?:de\s+)?chez|fournisseur|vendeur|[e\xe9]metteur|prestataire)\s*[:#]?\s*(.+)/i,
     /(?:soci[e\xe9]t[e\xe9]|entreprise|raison\s+sociale)\s*[:#]?\s*(.+)/i,
   ];
   for (const re of supplierPatterns) {
@@ -188,7 +213,10 @@ function parseInvoiceText(text) {
     }
   }
   if (!result.fournisseur && lines.length > 0) {
-    const candidate = lines.find(l => l.length > 3 && l.length < 80 && !/^\d/.test(l));
+    const GENERIC_LINE = /^(facture|invoice|pay[eé]|total|page\s|nos\s|tva\b|re[cç]u|bon\s+de)/i;
+    const candidate = lines.find(l =>
+      l.length > 3 && l.length < 80 && !/^\d/.test(l) && !GENERIC_LINE.test(l)
+    );
     if (candidate) result.fournisseur = candidate;
   }
 
@@ -211,7 +239,7 @@ function parseInvoiceText(text) {
   if (htM) _montant_ht = parseAmount(htM[1]);
 
   const ttcM = text.match(
-    /(?:(?:total|net)\s+)?(?:TTC|toutes?\s+taxes?\s+comprises?|net\s+[a\u00e0]\s+payer|montant\s+pay[e\xe9])\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
+    /(?:(?:total|net)\s+)?(?:TTC|toutes?\s+taxes?\s+comprises?|net\s+[a\u00e0]\s+payer|total\s+[a\u00e0]\s+payer|montant\s+pay[e\xe9]|facture\s+total)\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
   );
   if (ttcM) result.montant_ttc = parseAmount(ttcM[1]);
 
@@ -229,6 +257,28 @@ function parseInvoiceText(text) {
 
     const tvaRateM = text.match(/TVA\s*(?:[a\u00e0@]\s*)?(\d+[,.]?\d*)\s*%/i);
     if (tvaRateM) _taux_tva = snapTvaRate(parseAmount(tvaRateM[1]));
+  }
+
+  // ── Pattern tableau Amazon : "20 % 33,32 € 6,67 €" (taux HT TVA sur une ligne)
+  // Déclenché uniquement si les données TVA sont encore incomplètes
+  if ((_taux_tva === null || _montant_ht === null || _montant_tva === null)) {
+    const tableM = text.match(
+      /(\d+(?:[,.]\d+)?)\s*%[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/
+    );
+    if (tableM) {
+      const tableTaux = snapTvaRate(parseAmount(tableM[1]));
+      const tableHt   = parseAmount(tableM[2]);
+      const tableTva  = parseAmount(tableM[3]);
+      // Vérifier cohérence : tva ≈ ht * taux/100 (tolérance 5 cts)
+      if (tableTaux !== null && tableHt !== null && tableTva !== null) {
+        const expected = Math.round(tableHt * tableTaux / 100 * 100) / 100;
+        if (Math.abs(expected - tableTva) <= 0.05) {
+          if (_taux_tva === null) _taux_tva = tableTaux;
+          if (_montant_ht === null) _montant_ht = tableHt;
+          if (_montant_tva === null) _montant_tva = tableTva;
+        }
+      }
+    }
   }
 
   // Inférer le taux TVA manquant depuis le ratio HT/TVA
