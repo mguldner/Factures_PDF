@@ -1,5 +1,4 @@
 import { btnBuy } from './dom.js';
-import { state } from './state.js';
 import { showToast, updateCreditsUI } from './ui.js';
 import { setPaidAuth } from './auth.js';
 
@@ -32,20 +31,8 @@ export async function handleStripeReturn() {
   }
 }
 
-// ─── Sélection quantité et achat de crédits ───────────────────────────────────
+// ─── Achat de crédits ────────────────────────────────────────────────────────
 export function initPayment() {
-  document.querySelectorAll('.credit-option').forEach(el => {
-    el.addEventListener('click', () => {
-      document.querySelectorAll('.credit-option').forEach(o => {
-        o.classList.remove('border-blue-500', 'ring-2', 'ring-blue-200');
-        o.classList.add('border-gray-200');
-      });
-      el.classList.remove('border-gray-200');
-      el.classList.add('border-blue-500', 'ring-2', 'ring-blue-200');
-      state.selectedQty = parseInt(el.dataset.qty, 10);
-    });
-  });
-
   btnBuy.addEventListener('click', async () => {
     btnBuy.disabled = true;
     btnBuy.textContent = 'Redirection…';
@@ -53,7 +40,7 @@ export function initPayment() {
       const r = await fetch('/api/create-checkout', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ quantity: state.selectedQty }),
+        body:    JSON.stringify({}),
       });
       const { url } = await r.json();
       location.href = url;

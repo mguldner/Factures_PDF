@@ -432,7 +432,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { images } = req.body || {};
+  const { images, text } = req.body || {};
   const authToken = req.headers['x-free-trial-token'] || req.headers['x-stripe-session-id'];
   const authType  = req.headers['x-free-trial-token'] ? 'free_trial'
                   : req.headers['x-stripe-session-id'] ? 'paid'
@@ -479,15 +479,20 @@ export default async function handler(req, res) {
   try {
     let data;
 
-    if (!Array.isArray(images) || images.length === 0) {
-      return res.status(400).json({ error: 'Aucune image à traiter' });
+    if (typeof text === 'string' && text.trim().length > 0) {
+      console.log('[extract] → heuristique texte');
+      data = parseInvoiceText(text);
+      console.log('[extract] heuristique texte utilisé');
+    } else if (Array.isArray(images) && images.length > 0) {
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
+      }
+      console.log('[extract] → OpenAI Vision');
+      data = await extractWithVision(images);
+      console.log('[extract] OpenAI Vision utilisé');
+    } else {
+      return res.status(400).json({ error: 'Aucun contenu à traiter' });
     }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
-    }
-    console.log('[extract] → OpenAI Vision');
-    data = await extractWithVision(images);
-    console.log('[extract] OpenAI Vision utilisé');
 
     // Validation SIRET : doit faire exactement 9 ou 14 chiffres
     if (data.siret) {
