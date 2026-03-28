@@ -56,10 +56,43 @@ function parseAmount(str) {
   return isNaN(n) ? null : Math.round(n * 100) / 100;
 }
 
+const FR_TVA_RATES = [20, 10, 5.5, 2.1, 0];
+
 function snapTvaRate(rate) {
   if (rate === null || rate === undefined) return null;
-  const std = [20, 10, 5.5, 2.1, 0];
-  return std.reduce((best, r) => Math.abs(r - rate) < Math.abs(best - rate) ? r : best);
+  return FR_TVA_RATES.reduce((best, r) => Math.abs(r - rate) < Math.abs(best - rate) ? r : best);
+}
+
+/**
+ * Normalise un tableau de lignes TVA :
+ * - snap de chaque taux au taux standard le plus proche (tolérance ±0.5 %)
+ * - recalcul de montant_tva si manquant
+ * - calcul de tva_totale comme somme des montant_tva
+ */
+function normalizeLignesTva(lignes) {
+  if (!Array.isArray(lignes) || lignes.length === 0) return { lignes_tva: [], tva_totale: 0 };
+
+  const normalized = lignes
+    .map(l => {
+      const rawTaux = typeof l.taux === 'number' ? l.taux : parseFloat(l.taux);
+      const taux = isNaN(rawTaux) ? null : snapTvaRate(rawTaux);
+      const base_ht = typeof l.base_ht === 'number' ? l.base_ht : parseFloat(l.base_ht) || null;
+      let montant_tva = typeof l.montant_tva === 'number' ? l.montant_tva : parseFloat(l.montant_tva) || null;
+
+      // Inférer montant_tva si manquant mais base_ht et taux connus
+      if (montant_tva === null && base_ht !== null && taux !== null) {
+        montant_tva = Math.round(base_ht * taux / 100 * 100) / 100;
+      }
+
+      return { taux, base_ht, montant_tva };
+    })
+    .filter(l => l.taux !== null || l.base_ht !== null);
+
+  const tva_totale = Math.round(
+    normalized.reduce((sum, l) => sum + (l.montant_tva ?? 0), 0) * 100
+  ) / 100;
+
+  return { lignes_tva: normalized, tva_totale };
 }
 
 function parseInvoiceText(text) {
@@ -68,11 +101,17 @@ function parseInvoiceText(text) {
     date: null,
     fournisseur: null,
     siret: null,
-    montant_ht: null,
-    taux_tva: null,
-    montant_tva: null,
+    libelle: null,
+    devise: 'EUR',
+    lignes_tva: [],
+    tva_totale: 0,
     montant_ttc: null,
   };
+
+  // Variables internes pour l'extraction TVA (fusionnées en lignes_tva à la fin)
+  let _montant_ht = null;
+  let _taux_tva = null;
+  let _montant_tva = null;
 
   // ── Numéro de facture
   const numPatterns = [
@@ -138,13 +177,23 @@ function parseInvoiceText(text) {
     if (candidate) result.fournisseur = candidate;
   }
 
-  // ── Montants — pattern: keyword followed by amount
-  const amountRe = /([0-9\s\u00a0]+[,.]?[0-9]{0,2})\s*\u20ac?/;
+  // ── Libellé
+  const libelleM = text.match(
+    /(?:objet|prestation|d[eé]signation|description|pour|service|libell[eé])\s*[:#]?\s*(.+)/i
+  );
+  if (libelleM) result.libelle = libelleM[1].trim().slice(0, 150);
 
+  // ── Devise
+  if (/\b(USD|US\$)\b/.test(text)) result.devise = 'USD';
+  else if (/\bGBP\b|£/.test(text)) result.devise = 'GBP';
+  else if (/\bCHF\b/.test(text)) result.devise = 'CHF';
+  else result.devise = 'EUR';
+
+  // ── Montants — pattern: keyword followed by amount
   const htM = text.match(
     /(?:(?:total|sous-total|montant)\s+)?(?:HT|hors[\s-]taxe?s?)\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
   );
-  if (htM) result.montant_ht = parseAmount(htM[1]);
+  if (htM) _montant_ht = parseAmount(htM[1]);
 
   const ttcM = text.match(
     /(?:(?:total|net)\s+)?(?:TTC|toutes?\s+taxes?\s+comprises?|net\s+[a\u00e0]\s+payer|montant\s+pay[e\xe9])\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
@@ -155,30 +204,39 @@ function parseInvoiceText(text) {
     /TVA\s*(?:[a\u00e0@]\s*)?(\d+[,.]?\d*)\s*%\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
   );
   if (tvaRateAmtM) {
-    result.taux_tva = snapTvaRate(parseAmount(tvaRateAmtM[1]));
-    result.montant_tva = parseAmount(tvaRateAmtM[2]);
+    _taux_tva = snapTvaRate(parseAmount(tvaRateAmtM[1]));
+    _montant_tva = parseAmount(tvaRateAmtM[2]);
   } else {
     const tvaAmtM = text.match(
       /(?:TVA|T\.V\.A\.)\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
     );
-    if (tvaAmtM) result.montant_tva = parseAmount(tvaAmtM[1]);
+    if (tvaAmtM) _montant_tva = parseAmount(tvaAmtM[1]);
 
     const tvaRateM = text.match(/TVA\s*(?:[a\u00e0@]\s*)?(\d+[,.]?\d*)\s*%/i);
-    if (tvaRateM) result.taux_tva = snapTvaRate(parseAmount(tvaRateM[1]));
+    if (tvaRateM) _taux_tva = snapTvaRate(parseAmount(tvaRateM[1]));
   }
 
-  // Infer missing TVA rate
-  if (result.taux_tva === null && result.montant_ht && result.montant_tva) {
-    result.taux_tva = snapTvaRate((result.montant_tva / result.montant_ht) * 100);
+  // Inférer le taux TVA manquant depuis le ratio HT/TVA
+  if (_taux_tva === null && _montant_ht && _montant_tva) {
+    _taux_tva = snapTvaRate((_montant_tva / _montant_ht) * 100);
   }
 
-  // Compute missing amount
-  if (result.montant_ht && result.montant_tva && !result.montant_ttc)
-    result.montant_ttc = Math.round((result.montant_ht + result.montant_tva) * 100) / 100;
-  if (result.montant_ttc && result.montant_tva && !result.montant_ht)
-    result.montant_ht = Math.round((result.montant_ttc - result.montant_tva) * 100) / 100;
-  if (result.montant_ht && result.montant_ttc && !result.montant_tva)
-    result.montant_tva = Math.round((result.montant_ttc - result.montant_ht) * 100) / 100;
+  // Compléter les montants manquants
+  if (_montant_ht && _montant_tva && !result.montant_ttc)
+    result.montant_ttc = Math.round((_montant_ht + _montant_tva) * 100) / 100;
+  if (result.montant_ttc && _montant_tva && !_montant_ht)
+    _montant_ht = Math.round((result.montant_ttc - _montant_tva) * 100) / 100;
+  if (_montant_ht && result.montant_ttc && !_montant_tva)
+    _montant_tva = Math.round((result.montant_ttc - _montant_ht) * 100) / 100;
+
+  // Construire lignes_tva à partir des données extraites
+  if (_montant_ht !== null || _montant_tva !== null) {
+    const { lignes_tva, tva_totale } = normalizeLignesTva([
+      { taux: _taux_tva, base_ht: _montant_ht, montant_tva: _montant_tva },
+    ]);
+    result.lignes_tva = lignes_tva;
+    result.tva_totale = tva_totale;
+  }
 
   return result;
 }
@@ -201,24 +259,27 @@ async function extractWithVision(images) {
         content: [
           {
             type: 'text',
-            text: `Analyse cette facture française. Extrait les informations suivantes et réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour :
+            text: `Analyse cette facture. Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour :
 {
   "numero_facture": "string ou null",
   "date": "DD/MM/YYYY ou null",
   "fournisseur": "nom de l'entreprise émettrice ou null",
   "siret": "numéro SIRET/SIREN sans espaces ou null",
-  "montant_ht": number ou null,
-  "taux_tva": 20 | 10 | 5.5 | 2.1 | 0 | null,
-  "montant_tva": number ou null,
+  "libelle": "description courte du service ou produit facturé ou null",
+  "devise": "code ISO de la devise (ex: EUR, USD, GBP) ou EUR par défaut",
+  "lignes_tva": [
+    { "taux": 20.0, "base_ht": 1000.00, "montant_tva": 200.00 }
+  ],
   "montant_ttc": number ou null
 }
-Les montants sont des nombres décimaux avec point (ex: 1234.56). Le taux TVA doit être l'un des taux français standards.`,
+Pour lignes_tva, liste chaque taux TVA distinct présent sur la facture (une entrée par taux). Taux autorisés : 20, 10, 5.5, 2.1, 0. Si la facture n'a pas de TVA, retourne un tableau vide [].
+Les montants sont des nombres décimaux avec point (ex: 1234.56). La devise est un code ISO 4217 sur 3 lettres.`,
           },
           ...imageContent,
         ],
       },
     ],
-    max_tokens: 600,
+    max_tokens: 800,
   });
 
   const content = choices[0].message.content.trim();
@@ -226,15 +287,31 @@ Les montants sont des nombres décimaux avec point (ex: 1234.56). Le taux TVA do
   if (!jsonMatch) throw new Error('Réponse IA invalide');
   const data = JSON.parse(jsonMatch[0]);
 
-  // Normalize
-  if (data.taux_tva !== null && data.taux_tva !== undefined) {
-    data.taux_tva = snapTvaRate(data.taux_tva);
+  // Fallback : si GPT retourne l'ancien format plat, convertir en lignes_tva
+  if (!Array.isArray(data.lignes_tva)) {
+    const flat_ht  = data.montant_ht  ?? null;
+    const flat_tva = data.montant_tva ?? null;
+    const flat_taux = data.taux_tva   ?? null;
+    data.lignes_tva = (flat_ht !== null || flat_tva !== null)
+      ? [{ taux: flat_taux, base_ht: flat_ht, montant_tva: flat_tva }]
+      : [];
   }
-  // Infer missing amount
-  if (data.montant_ht && data.montant_tva && !data.montant_ttc)
-    data.montant_ttc = Math.round((data.montant_ht + data.montant_tva) * 100) / 100;
-  if (data.montant_ttc && data.montant_tva && !data.montant_ht)
-    data.montant_ht = Math.round((data.montant_ttc - data.montant_tva) * 100) / 100;
+
+  // Normaliser les taux et calculer tva_totale
+  const { lignes_tva, tva_totale } = normalizeLignesTva(data.lignes_tva);
+  data.lignes_tva = lignes_tva;
+  data.tva_totale = tva_totale;
+
+  // Inférer montant_ttc si manquant
+  if (!data.montant_ttc && lignes_tva.length > 0) {
+    const total_ht = Math.round(lignes_tva.reduce((s, l) => s + (l.base_ht ?? 0), 0) * 100) / 100;
+    if (total_ht > 0) data.montant_ttc = Math.round((total_ht + tva_totale) * 100) / 100;
+  }
+
+  // Supprimer les champs plats résiduels
+  delete data.montant_ht;
+  delete data.taux_tva;
+  delete data.montant_tva;
 
   return data;
 }
@@ -246,7 +323,11 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { text, images, authToken, authType } = req.body || {};
+  const { text, images } = req.body || {};
+  const authToken = req.headers['x-free-trial-token'] || req.headers['x-stripe-session-id'];
+  const authType  = req.headers['x-free-trial-token'] ? 'free_trial'
+                  : req.headers['x-stripe-session-id'] ? 'paid'
+                  : null;
   const secret = process.env.FREE_TRIAL_SECRET;
 
   // ── Vérification auth

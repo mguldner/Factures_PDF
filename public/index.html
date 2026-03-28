@@ -34,6 +34,25 @@
     /* Smooth reveal */
     .screen-fade { animation: fadeIn 0.2s ease-out; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    /* Shimmer progress bar */
+    @keyframes shimmer {
+      0%   { background-position: -200% center; }
+      100% { background-position:  200% center; }
+    }
+    .progress-shimmer {
+      background: linear-gradient(90deg, #3b82f6 0%, #93c5fd 40%, #3b82f6 60%, #3b82f6 100%);
+      background-size: 200% auto;
+      animation: shimmer 1.6s linear infinite;
+    }
+    /* Message fade */
+    #processing-msg { transition: opacity 0.25s ease; }
+    #processing-msg.msg-fade { opacity: 0; }
+    /* Reconfirmation indicator */
+    #export-section { transition: border-color 0.25s, box-shadow 0.25s; }
+    #export-section.needs-reconfirm {
+      border-color: #f97316;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+    }
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-gray-900 antialiased">
@@ -174,6 +193,11 @@
         <div class="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent spinner"></div>
       </div>
 
+      <!-- Barre de progression shimmer -->
+      <div class="w-52 h-1 bg-gray-100 rounded-full overflow-hidden">
+        <div class="progress-shimmer h-full w-full rounded-full"></div>
+      </div>
+
       <div class="text-center">
         <p class="text-lg font-semibold text-gray-800" id="processing-title">Analyse en cours…</p>
         <p class="text-sm text-gray-400 mt-1.5 min-h-[1.25rem]" id="processing-msg">
@@ -205,7 +229,7 @@
     <div id="invoices-container" class="space-y-4 mb-6"></div>
 
     <!-- Export -->
-    <div class="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+    <div id="export-section" class="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
       <div class="flex items-center justify-between gap-4 mb-5">
         <div>
           <h3 class="font-semibold text-gray-900">Exporter en CSV</h3>
