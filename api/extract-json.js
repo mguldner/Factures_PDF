@@ -254,7 +254,7 @@ function parseInvoiceText(text) {
   if (ttcM) result.montant_ttc = parseAmount(ttcM[1]);
 
   const tvaRateAmtM = text.match(
-    /TVA\s*(?:[a\u00e0@]\s*)?(\d+[,.]?\d*)\s*%\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
+    /TVA[^\S\n]*(?:[a\u00e0@][^\S\n]*)?(\d+[,.]?\d*)\s*%\s*[:\s]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/i
   );
   if (tvaRateAmtM) {
     _taux_tva = snapTvaRate(parseAmount(tvaRateAmtM[1]));
@@ -270,16 +270,14 @@ function parseInvoiceText(text) {
   }
 
   // ── Pattern tableau : "20 % 33,32 € 6,67 €" (taux HT TVA sur une ligne)
-  // Si les valeurs passent le test de cohérence, elles font autorité (override)
+  // Itère toutes les occurrences et prend la première cohérente (tva ≈ ht * taux/100)
   {
-    const tableM = text.match(
-      /(\d+(?:[,.]\d+)?)\s*%[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/
-    );
-    if (tableM) {
+    const TABLE_RE = /(\d+(?:[,.]\d+)?)\s*%[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/g;
+    let tableM;
+    while ((tableM = TABLE_RE.exec(text)) !== null) {
       const tableTaux = snapTvaRate(parseAmount(tableM[1]));
       const tableHt   = parseAmount(tableM[2]);
       const tableTva  = parseAmount(tableM[3]);
-      // Vérifier cohérence : tva ≈ ht * taux/100 (tolérance 5 cts)
       if (tableTaux !== null && tableHt !== null && tableTva !== null) {
         const expected = Math.round(tableHt * tableTaux / 100 * 100) / 100;
         if (Math.abs(expected - tableTva) <= 0.05) {
@@ -287,6 +285,7 @@ function parseInvoiceText(text) {
           _taux_tva   = tableTaux;
           _montant_ht = tableHt;
           _montant_tva = tableTva;
+          break;
         }
       }
     }
