@@ -52,9 +52,12 @@ async function sendToWebhook(url, rating, message) {
     ? { content: `📣 **Nouveau retour FactureCSV**\n${lines.join('\n')}` }
     : { text: `📣 *Nouveau retour FactureCSV*\n${lines.join('\n')}` };
 
-  await fetch(url, {
+  const discordRes = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  if (!discordRes.ok) {
+    console.error('[feedback] webhook error', discordRes.status, await discordRes.text());
+  }
 }

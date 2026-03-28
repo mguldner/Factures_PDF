@@ -27,8 +27,8 @@ export default async function handler(req, res) {
 
   const { filename, fileSize, errorMsg, comment, pdfBase64 } = body ?? {};
 
-  if (!filename || !errorMsg) {
-    return res.status(400).json({ error: 'filename and errorMsg are required' });
+  if (!filename) {
+    return res.status(400).json({ error: 'filename is required' });
   }
 
   const webhookUrl = process.env.FEEDBACK_WEBHOOK_URL;
@@ -50,11 +50,9 @@ export default async function handler(req, res) {
 
 async function sendToWebhook(url, { filename, fileSize, errorMsg, comment, pdfBase64 }) {
   const fileSizeStr = fileSize ? formatSize(fileSize) : 'inconnu';
-  const lines = [
-    `**Fichier :** ${filename} (${fileSizeStr})`,
-    `**Erreur :** ${errorMsg}`,
-  ];
-  if (comment) lines.push(`**Commentaire :** ${comment}`);
+  const lines = [`**Fichier :** ${filename} (${fileSizeStr})`];
+  if (errorMsg) lines.push(`**Erreur :** ${errorMsg}`);
+  if (comment)  lines.push(`**Commentaire :** ${comment}`);
 
   const isDiscord = url.includes('discord');
   const msgText   = `🐛 **Facture non analysée — FactureCSV**\n${lines.join('\n')}`;
@@ -70,7 +68,8 @@ async function sendToWebhook(url, { filename, fileSize, errorMsg, comment, pdfBa
     const payload = isDiscord ? { content: msgText } : { text: msgText };
     formData.append('payload_json', JSON.stringify(payload));
 
-    await fetch(url, { method: 'POST', body: formData });
+    const r = await fetch(url, { method: 'POST', body: formData });
+    if (!r.ok) console.error('[report-issue] webhook error', r.status, await r.text());
   } else {
     // Pas de fichier (trop volumineux) — message texte uniquement
     const suffix  = '\n_PDF non joint (fichier trop volumineux)_';
@@ -78,11 +77,12 @@ async function sendToWebhook(url, { filename, fileSize, errorMsg, comment, pdfBa
       ? { content: msgText + suffix }
       : { text:    msgText + suffix };
 
-    await fetch(url, {
+    const r = await fetch(url, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
     });
+    if (!r.ok) console.error('[report-issue] webhook error', r.status, await r.text());
   }
 }
 
