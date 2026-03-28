@@ -227,9 +227,9 @@ function parseInvoiceText(text) {
 
   // ── Libellé = numéro de commande
   const orderPatterns = [
-    /(?:n[°\xb0]\s*(?:de\s+(?:la\s+)?)?commande|num[eé]ro\s+(?:de\s+(?:la\s+)?)?commande|commande\s+n[°\xb0]|bon\s+de\s+commande)\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
-    /(?:order\s+(?:number|no\.?|#)|po\s+(?:number|no\.?|#))\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
-    /(?:r[eé]f(?:[eé]rence)?\s+commande|commande\s+r[eé]f)\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
+    /(?:n[°\xb0]\s*(?:de\s+(?:la\s+)?)?commande|num[eé]ro\s+(?:de\s+(?:la\s+)?)?commande|commande\s+n[°\xb0]|bon\s+de\s+commande)\s*[:#]?\s*([A-Z0-9][-A-Z0-9/_]{1,30})/i,
+    /(?:order\s+(?:number|no\.?|#)|po\s+(?:number|no\.?|#))\s*[:#]?\s*([A-Z0-9][-A-Z0-9/_]{1,30})/i,
+    /(?:r[eé]f(?:[eé]rence)?\s+commande|commande\s+r[eé]f)\s*[:#]?\s*([A-Z0-9][-A-Z0-9/_]{1,30})/i,
   ];
   for (const re of orderPatterns) {
     const m = text.match(re);
