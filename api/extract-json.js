@@ -231,6 +231,39 @@ function parseInvoiceText(text) {
   );
   if (libelleM) result.libelle = (libelleM[1] ?? libelleM[2]).trim().slice(0, 150);
 
+  // ── Libellé fallback : premier article du tableau (après l'en-tête "Description Qté/Prix...")
+  if (!result.libelle) {
+    // Chercher la ligne d'en-tête du tableau contenant "Description" + un mot de colonne
+    const tableHeaderM = text.match(
+      /description\s*(?:qt[eé]|quantit[eé]|prix|unit[eé])[^\n]*\n([^\n]+)/i
+    );
+    if (tableHeaderM) {
+      const firstItem = tableHeaderM[1].trim();
+      if (firstItem.length >= 10 && /[a-zA-Z\u00c0-\u00ff]{4}/.test(firstItem)) {
+        // Couper à la limite de mot la plus proche sous 60 chars
+        result.libelle = firstItem.length > 60
+          ? firstItem.slice(0, 61).replace(/\s\S*$/, '')
+          : firstItem;
+      }
+    }
+  }
+
+  // ── Libellé fallback 2 : scan de lignes (pour formats sans tableau structuré)
+  if (!result.libelle) {
+    const SKIP_LIBELLE = /^(date|num[eé]ro|total|taux|tva|facture|invoice|adresse|siret|siren|page\s|livraison|commande|paiement|r[eé]f[eé]rence|vendu\s+par|veuillez|nos\s|amazon\s|asin[:\s]|b0[a-z0-9]{7,}|description|d[eé]tails)/i;
+    const candidate = lines.find(l =>
+      l.length >= 15 && l.length <= 150 &&
+      !/^\d/.test(l) &&
+      !SKIP_LIBELLE.test(l) &&
+      /[a-zA-Z\u00c0-\u00ff]{4}/.test(l)
+    );
+    if (candidate) {
+      result.libelle = candidate.length > 60
+        ? candidate.slice(0, 61).replace(/\s\S*$/, '')
+        : candidate;
+    }
+  }
+
   // ── Devise
   if (/\b(USD|US\$)\b/.test(text)) result.devise = 'USD';
   else if (/\bGBP\b|£/.test(text)) result.devise = 'GBP';
