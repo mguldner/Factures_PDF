@@ -202,7 +202,12 @@ function parseInvoiceText(text) {
   ];
   for (const re of supplierPatterns) {
     const m = text.match(re);
-    if (m) { result.fournisseur = m[1].trim().slice(0, 80); break; }
+    if (m) {
+      // Tronquer dès qu'un label d'en-tête de facture commence (texte sur même ligne)
+      const val = m[1].replace(/\s+(?:date\s+de|num[eé]ro|total\s+[aà]|adresse|r[eé]f[eé]rence|veuillez).*/i, '').trim().slice(0, 80);
+      result.fournisseur = val;
+      break;
+    }
   }
   if (!result.fournisseur && result.siret) {
     const idx = lines.findIndex(l => l.includes(result.siret));
@@ -222,9 +227,9 @@ function parseInvoiceText(text) {
 
   // ── Libellé
   const libelleM = text.match(
-    /(?:objet|prestation|d[eé]signation|description|pour|service|libell[eé])\s*[:#]?\s*(.+)/i
+    /(?:objet|prestation|d[eé]signation|libell[eé])\s*[:#]\s*(.+)|(?:description)\s*[:#]\s*(.+)/i
   );
-  if (libelleM) result.libelle = libelleM[1].trim().slice(0, 150);
+  if (libelleM) result.libelle = (libelleM[1] ?? libelleM[2]).trim().slice(0, 150);
 
   // ── Devise
   if (/\b(USD|US\$)\b/.test(text)) result.devise = 'USD';
@@ -259,9 +264,9 @@ function parseInvoiceText(text) {
     if (tvaRateM) _taux_tva = snapTvaRate(parseAmount(tvaRateM[1]));
   }
 
-  // ── Pattern tableau Amazon : "20 % 33,32 € 6,67 €" (taux HT TVA sur une ligne)
-  // Déclenché uniquement si les données TVA sont encore incomplètes
-  if ((_taux_tva === null || _montant_ht === null || _montant_tva === null)) {
+  // ── Pattern tableau : "20 % 33,32 € 6,67 €" (taux HT TVA sur une ligne)
+  // Si les valeurs passent le test de cohérence, elles font autorité (override)
+  {
     const tableM = text.match(
       /(\d+(?:[,.]\d+)?)\s*%[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?[\s\u00a0]+([0-9\s\u00a0]+[,.][0-9]{2})\s*\u20ac?/
     );
@@ -273,9 +278,10 @@ function parseInvoiceText(text) {
       if (tableTaux !== null && tableHt !== null && tableTva !== null) {
         const expected = Math.round(tableHt * tableTaux / 100 * 100) / 100;
         if (Math.abs(expected - tableTva) <= 0.05) {
-          if (_taux_tva === null) _taux_tva = tableTaux;
-          if (_montant_ht === null) _montant_ht = tableHt;
-          if (_montant_tva === null) _montant_tva = tableTva;
+          // Valeurs cohérentes → override complet (le tableau fait autorité)
+          _taux_tva   = tableTaux;
+          _montant_ht = tableHt;
+          _montant_tva = tableTva;
         }
       }
     }
