@@ -5,6 +5,7 @@ import { showScreen, showToast, updateCreditsUI } from './ui.js';
 import { startProgressCycle, setProgressMsg, stopProgressCycle } from './progress.js';
 import { renderReviewScreen } from './review.js';
 import { setupFieldEditing } from './editor.js';
+import { showExtractionError, hideExtractionError } from './report.js';
 
 // ─── Traitement d'un fichier PDF ──────────────────────────────────────────────
 export async function processFile(file) {
@@ -19,6 +20,7 @@ export async function processFile(file) {
     return;
   }
 
+  hideExtractionError();
   showScreen('processing');
   startProgressCycle('Lecture du PDF…');
 
@@ -75,7 +77,7 @@ export async function processFile(file) {
   } catch (err) {
     stopProgressCycle();
     console.error(err);
-    showToast(err.message, 'error');
     showScreen('upload');
+    showExtractionError(file, err.message);
   }
 }

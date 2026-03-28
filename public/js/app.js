@@ -4,6 +4,8 @@ import { showScreen, updateCreditsUI } from './ui.js';
 import { initUpload } from './upload.js';
 import { initGenerate } from './generate.js';
 import { initPayment, handleStripeReturn } from './payment.js';
+import { initFeedback } from './feedback.js';
+import { initReport } from './report.js';
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -23,6 +25,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initUpload();
   initGenerate();
   initPayment();
+  initFeedback();
+  initReport();
 
   // Bouton "Nouvelle facture"
   btnNewInvoice.addEventListener('click', () => showScreen('upload'));
