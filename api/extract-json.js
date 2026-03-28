@@ -432,7 +432,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { text, images } = req.body || {};
+  const { images } = req.body || {};
   const authToken = req.headers['x-free-trial-token'] || req.headers['x-stripe-session-id'];
   const authType  = req.headers['x-free-trial-token'] ? 'free_trial'
                   : req.headers['x-stripe-session-id'] ? 'paid'
@@ -478,52 +478,16 @@ export default async function handler(req, res) {
   // ── Extraction
   try {
     let data;
-    const wordCount = text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
 
-    if (wordCount > 50) {
-      console.log(`[extract] Texte détecté (${wordCount} mots) → parsing heuristique`);
-      data = parseInvoiceText(text);
-      // Fallback vision si trop de champs critiques manquants
-      if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
-        const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
-          + (data.lignes_tva?.length ? 0 : 1);
-        if (criticalNulls >= 2) {
-          console.log(`[extract] ${criticalNulls} champs critiques manquants → fallback OpenAI Vision`);
-          data = await extractWithVision(images);
-          console.log('[extract] OpenAI Vision utilisé');
-        } else {
-          console.log('[extract] OpenAI NON utilisé (champs suffisants)');
-        }
-      } else {
-        console.log('[extract] OpenAI NON utilisé (pas d\'images ou clé absente)');
-      }
-    } else if (Array.isArray(images) && images.length > 0) {
-      if (!process.env.OPENAI_API_KEY) {
-        return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
-      }
-      console.log('[extract] PDF scanné (texte insuffisant) → OpenAI Vision');
-      data = await extractWithVision(images);
-      console.log('[extract] OpenAI Vision utilisé');
-    } else if (wordCount > 0) {
-      console.log(`[extract] Texte court (${wordCount} mots) → parsing heuristique`);
-      data = parseInvoiceText(text);
-      // Fallback vision si trop de champs critiques manquants
-      if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
-        const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
-          + (data.lignes_tva?.length ? 0 : 1);
-        if (criticalNulls >= 2) {
-          console.log(`[extract] ${criticalNulls} champs critiques manquants → fallback OpenAI Vision`);
-          data = await extractWithVision(images);
-          console.log('[extract] OpenAI Vision utilisé');
-        } else {
-          console.log('[extract] OpenAI NON utilisé (champs suffisants)');
-        }
-      } else {
-        console.log('[extract] OpenAI NON utilisé (pas d\'images ou clé absente)');
-      }
-    } else {
-      return res.status(400).json({ error: 'Aucun contenu à traiter' });
+    if (!Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ error: 'Aucune image à traiter' });
     }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
+    }
+    console.log('[extract] → OpenAI Vision');
+    data = await extractWithVision(images);
+    console.log('[extract] OpenAI Vision utilisé');
 
     // Validation SIRET : doit faire exactement 9 ou 14 chiffres
     if (data.siret) {
