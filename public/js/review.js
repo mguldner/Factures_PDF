@@ -7,7 +7,7 @@ const FIELDS = [
   { key: 'numero_facture', label: 'N° Facture',        type: 'text',   span: false },
   { key: 'date',           label: 'Date',               type: 'text',   span: false, placeholder: 'JJ/MM/AAAA' },
   { key: 'fournisseur',    label: 'Fournisseur',        type: 'text',   span: true  },
-  { key: 'libelle',        label: 'Libellé',            type: 'text',   span: true  },
+  { key: 'libelle',        label: 'N° Commande',        type: 'text',   span: true  },
   { key: 'siret',          label: 'SIRET / SIREN',      type: 'text',   span: false },
   { key: 'devise',         label: 'Devise',             type: 'text',   span: false },
   { key: 'montant_ttc',    label: 'Montant TTC (€)',    type: 'number', span: false },

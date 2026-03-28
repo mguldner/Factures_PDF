@@ -225,48 +225,15 @@ function parseInvoiceText(text) {
     if (candidate) result.fournisseur = candidate;
   }
 
-  // ── Libellé — helpers partagés
-  const SKIP_LIBELLE = /^(date|num[eé]ro|total|taux|tva|facture|invoice|adresse|siret|siren|page\s|livraison|commande|paiement|r[eé]f[eé]rence|vendu\s+par|veuillez|nos\s|amazon\s|asin[:\s]|b0[a-z0-9]{7,}|description|d[eé]tails|informations?)/i;
-  function truncateLibelle(s) {
-    return s.length > 60 ? s.slice(0, 61).replace(/\s\S*$/, '').trim() : s;
-  }
-
-  // Priorité 1 : label explicite (objet:, libellé:, désignation:, description:)
-  const libelleM = text.match(
-    /(?:objet|prestation|d[eé]signation|libell[eé]|description)\s*[:#]\s*(.+)/i
-  );
-  if (libelleM) result.libelle = libelleM[1].trim().slice(0, 150);
-
-  // Priorité 2 : ligne d'en-tête tableau "Description Qté/Prix..." → premier article
-  if (!result.libelle) {
-    const tableHeaderM = text.match(
-      /description\s*(?:qt[eé]|quantit[eé]|prix|unit[eé])[^\n]*\n([^\n]+)/i
-    );
-    if (tableHeaderM) {
-      const firstItem = tableHeaderM[1].trim();
-      if (firstItem.length >= 10 && /[a-zA-Z\u00c0-\u00ff]{4}/.test(firstItem) && !SKIP_LIBELLE.test(firstItem)) {
-        result.libelle = truncateLibelle(firstItem);
-      }
-    }
-  }
-
-  // Priorité 3 : ligne avant "ASIN:" ou avant une ligne quantité+prix (ex: "1 33,32 € 20 %")
-  if (!result.libelle) {
-    const beforeAsinM = text.match(/([a-zA-Z\u00c0-\u00ff][^\n]{14,199})\n[^\n]*(?:asin\b|b0[a-z0-9]{8,})/i);
-    if (beforeAsinM && !SKIP_LIBELLE.test(beforeAsinM[1].trim())) {
-      result.libelle = truncateLibelle(beforeAsinM[1].trim());
-    }
-  }
-
-  // Priorité 4 : scan de toutes les lignes — première ligne qui ressemble à une description
-  if (!result.libelle) {
-    const candidate = lines.find(l =>
-      l.length >= 15 && l.length <= 150 &&
-      !/^\d/.test(l) &&
-      !SKIP_LIBELLE.test(l) &&
-      /[a-zA-Z\u00c0-\u00ff]{4}/.test(l)
-    );
-    if (candidate) result.libelle = truncateLibelle(candidate);
+  // ── Libellé = numéro de commande
+  const orderPatterns = [
+    /(?:n[°\xb0]\s*(?:de\s+)?commande|num[eé]ro\s+(?:de\s+)?commande|commande\s+n[°\xb0]|bon\s+de\s+commande)\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
+    /(?:order\s+(?:number|no\.?|#)|po\s+(?:number|no\.?|#))\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
+    /(?:r[eé]f(?:[eé]rence)?\s+commande|commande\s+r[eé]f)\s*[:#]?\s*([A-Z0-9][-A-Z0-9\/_. ]{1,30})/i,
+  ];
+  for (const re of orderPatterns) {
+    const m = text.match(re);
+    if (m) { result.libelle = m[1].trim().replace(/\s+$/, ''); break; }
   }
 
   // ── Devise
@@ -374,7 +341,7 @@ async function extractWithVision(images) {
   "date": "DD/MM/YYYY ou null",
   "fournisseur": "nom de l'entreprise émettrice ou null",
   "siret": "numéro SIRET/SIREN sans espaces ou null",
-  "libelle": "description courte du service ou produit facturé ou null",
+  "libelle": "numéro de commande (n° commande, bon de commande, order number, PO number) ou null si absent",
   "devise": "code ISO de la devise (ex: EUR, USD, GBP) ou EUR par défaut",
   "lignes_tva": [
     { "taux": 20.0, "base_ht": 1000.00, "montant_tva": 200.00 }
