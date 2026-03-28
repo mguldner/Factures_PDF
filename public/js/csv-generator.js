@@ -49,7 +49,7 @@ function fmtDate(val) {
 function escape(val) {
   if (val === null || val === undefined) return '';
   const s = String(val).trim();
-  return s.includes(';') || s.includes('"') || s.includes('\n')
+  return s.includes(';') || s.includes(',') || s.includes('"') || s.includes('\n')
     ? '"' + s.replace(/"/g, '""') + '"'
     : s;
 }
@@ -75,16 +75,16 @@ export function generateCSV(invoices) {
     ];
 
     if (lignes.length === 0) {
-      rows.push([...base, '', '', '', fmtAmount(tva_totale), fmtAmount(inv.montant_ttc), escape(inv.devise ?? 'EUR')].join(';'));
+      rows.push([...base, '', '', '', escape(fmtAmount(tva_totale)), escape(fmtAmount(inv.montant_ttc)), escape(inv.devise ?? 'EUR')].join(';'));
     } else {
       for (const l of lignes) {
         rows.push([
           ...base,
-          fmtAmount(l.taux),
-          fmtAmount(l.base_ht),
-          fmtAmount(l.montant_tva),
-          fmtAmount(tva_totale),
-          fmtAmount(inv.montant_ttc),
+          escape(fmtAmount(l.taux)),
+          escape(fmtAmount(l.base_ht)),
+          escape(fmtAmount(l.montant_tva)),
+          escape(fmtAmount(tva_totale)),
+          escape(fmtAmount(inv.montant_ttc)),
           escape(inv.devise ?? 'EUR'),
         ].join(';'));
       }
