@@ -5,7 +5,7 @@ import { showScreen, showToast, updateCreditsUI } from './ui.js';
 import { startProgressCycle, setProgressMsg, stopProgressCycle } from './progress.js';
 import { renderReviewScreen } from './review.js';
 import { setupFieldEditing } from './editor.js';
-import { showExtractionError, hideExtractionError } from './report.js';
+import { showExtractionError, hideExtractionError, setCurrentFile } from './report.js';
 
 // ─── Traitement d'un fichier PDF ──────────────────────────────────────────────
 export async function processFile(file) {
@@ -63,6 +63,8 @@ export async function processFile(file) {
 
     if (newToken) updateFreeTrialAuth(newToken, newCredits);
     updateCreditsUI();
+
+    setCurrentFile(file);
 
     state.invoices.push({
       ...data,

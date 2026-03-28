@@ -5,7 +5,7 @@ import { initUpload } from './upload.js';
 import { initGenerate } from './generate.js';
 import { initPayment, handleStripeReturn } from './payment.js';
 import { initFeedback } from './feedback.js';
-import { initReport } from './report.js';
+import { initReport, openReportModal } from './report.js';
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -27,6 +27,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPayment();
   initFeedback();
   initReport();
+
+  // Bouton "Données incorrectes ?" sur l'écran de révision
+  document.getElementById('btn-report-review').addEventListener('click', openReportModal);
 
   // Bouton "Nouvelle facture"
   btnNewInvoice.addEventListener('click', () => showScreen('upload'));

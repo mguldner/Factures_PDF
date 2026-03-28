@@ -2,11 +2,23 @@
 // Limite au-delà de laquelle on n'envoie pas le fichier brut (3 Mo)
 const PDF_SEND_LIMIT = 3 * 1024 * 1024;
 
-let _pendingFile = null;
+let _currentFile  = null; // fichier en cours (succès ou échec)
+let _pendingFile  = null; // fichier du dernier échec (pour la bannière)
 let _pendingError = '';
+
+// ─── Fichier courant (appelé à chaque extraction, même réussie) ──────────────
+export function setCurrentFile(file) {
+  _currentFile = file;
+}
+
+// ─── Ouvrir la modal de signalement (sans erreur associée) ───────────────────
+export function openReportModal() {
+  if (_currentFile) _openModal(_currentFile, '');
+}
 
 // ─── Affichage de la bannière d'erreur ───────────────────────────────────────
 export function showExtractionError(file, errorMsg) {
+  _currentFile  = file;
   _pendingFile  = file;
   _pendingError = errorMsg;
 
@@ -23,46 +35,58 @@ export function hideExtractionError() {
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
-export function initReport() {
-  const overlay    = document.getElementById('report-overlay');
-  const openBtn    = document.getElementById('btn-report-issue');
-  const closeBtn   = document.getElementById('report-close');
-  const submitBtn  = document.getElementById('report-submit');
-  const comment    = document.getElementById('report-comment');
-  const thanks     = document.getElementById('report-thanks');
-  const filename   = document.getElementById('report-filename');
-  const filesize   = document.getElementById('report-filesize');
-  const sizeWarn   = document.getElementById('report-size-warn');
+let _activeFile  = null;
+let _activeError = '';
 
-  function openModal() {
-    if (!_pendingFile) return;
-    filename.textContent = _pendingFile.name;
-    filesize.textContent = formatSize(_pendingFile.size);
-    sizeWarn.classList.toggle('hidden', _pendingFile.size <= PDF_SEND_LIMIT);
-    thanks.classList.add('hidden');
-    submitBtn.classList.remove('hidden');
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Envoyer le signalement';
-    comment.value = '';
-    overlay.classList.remove('hidden');
-    comment.focus();
-  }
+function _openModal(file, errorMsg) {
+  const overlay  = document.getElementById('report-overlay');
+  const filename = document.getElementById('report-filename');
+  const filesize = document.getElementById('report-filesize');
+  const sizeWarn = document.getElementById('report-size-warn');
+  const thanks   = document.getElementById('report-thanks');
+  const submitBtn = document.getElementById('report-submit');
+  const comment  = document.getElementById('report-comment');
+
+  _activeFile  = file;
+  _activeError = errorMsg;
+
+  filename.textContent = file.name;
+  filesize.textContent = formatSize(file.size);
+  sizeWarn.classList.toggle('hidden', file.size <= PDF_SEND_LIMIT);
+  thanks.classList.add('hidden');
+  submitBtn.classList.remove('hidden');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Envoyer le signalement';
+  comment.value = '';
+  overlay.classList.remove('hidden');
+  comment.focus();
+}
+
+export function initReport() {
+  const overlay   = document.getElementById('report-overlay');
+  const openBtn   = document.getElementById('btn-report-issue');
+  const closeBtn  = document.getElementById('report-close');
+  const submitBtn = document.getElementById('report-submit');
+  const comment   = document.getElementById('report-comment');
+  const thanks    = document.getElementById('report-thanks');
 
   function closeModal() {
     overlay.classList.add('hidden');
   }
 
-  openBtn.addEventListener('click', openModal);
+  openBtn.addEventListener('click', () => {
+    if (_pendingFile) _openModal(_pendingFile, _pendingError);
+  });
   closeBtn.addEventListener('click', closeModal);
   overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
 
   submitBtn.addEventListener('click', async () => {
-    if (!_pendingFile) return;
+    if (!_activeFile) return;
     submitBtn.disabled = true;
     submitBtn.textContent = 'Envoi…';
 
     try {
-      const body = await buildPayload(_pendingFile, _pendingError, comment.value.trim());
+      const body = await buildPayload(_activeFile, _activeError, comment.value.trim());
       await fetch('/api/report-issue', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
