@@ -225,43 +225,48 @@ function parseInvoiceText(text) {
     if (candidate) result.fournisseur = candidate;
   }
 
-  // ── Libellé
-  const libelleM = text.match(
-    /(?:objet|prestation|d[eé]signation|libell[eé])\s*[:#]\s*(.+)|(?:description)\s*[:#]\s*(.+)/i
-  );
-  if (libelleM) result.libelle = (libelleM[1] ?? libelleM[2]).trim().slice(0, 150);
+  // ── Libellé — helpers partagés
+  const SKIP_LIBELLE = /^(date|num[eé]ro|total|taux|tva|facture|invoice|adresse|siret|siren|page\s|livraison|commande|paiement|r[eé]f[eé]rence|vendu\s+par|veuillez|nos\s|amazon\s|asin[:\s]|b0[a-z0-9]{7,}|description|d[eé]tails|informations?)/i;
+  function truncateLibelle(s) {
+    return s.length > 60 ? s.slice(0, 61).replace(/\s\S*$/, '').trim() : s;
+  }
 
-  // ── Libellé fallback : premier article du tableau (après l'en-tête "Description Qté/Prix...")
+  // Priorité 1 : label explicite (objet:, libellé:, désignation:, description:)
+  const libelleM = text.match(
+    /(?:objet|prestation|d[eé]signation|libell[eé]|description)\s*[:#]\s*(.+)/i
+  );
+  if (libelleM) result.libelle = libelleM[1].trim().slice(0, 150);
+
+  // Priorité 2 : ligne d'en-tête tableau "Description Qté/Prix..." → premier article
   if (!result.libelle) {
-    // Chercher la ligne d'en-tête du tableau contenant "Description" + un mot de colonne
     const tableHeaderM = text.match(
       /description\s*(?:qt[eé]|quantit[eé]|prix|unit[eé])[^\n]*\n([^\n]+)/i
     );
     if (tableHeaderM) {
       const firstItem = tableHeaderM[1].trim();
-      if (firstItem.length >= 10 && /[a-zA-Z\u00c0-\u00ff]{4}/.test(firstItem)) {
-        // Couper à la limite de mot la plus proche sous 60 chars
-        result.libelle = firstItem.length > 60
-          ? firstItem.slice(0, 61).replace(/\s\S*$/, '')
-          : firstItem;
+      if (firstItem.length >= 10 && /[a-zA-Z\u00c0-\u00ff]{4}/.test(firstItem) && !SKIP_LIBELLE.test(firstItem)) {
+        result.libelle = truncateLibelle(firstItem);
       }
     }
   }
 
-  // ── Libellé fallback 2 : scan de lignes (pour formats sans tableau structuré)
+  // Priorité 3 : ligne avant "ASIN:" ou avant une ligne quantité+prix (ex: "1 33,32 € 20 %")
   if (!result.libelle) {
-    const SKIP_LIBELLE = /^(date|num[eé]ro|total|taux|tva|facture|invoice|adresse|siret|siren|page\s|livraison|commande|paiement|r[eé]f[eé]rence|vendu\s+par|veuillez|nos\s|amazon\s|asin[:\s]|b0[a-z0-9]{7,}|description|d[eé]tails)/i;
+    const beforeAsinM = text.match(/([a-zA-Z\u00c0-\u00ff][^\n]{14,199})\n[^\n]*(?:asin\b|b0[a-z0-9]{8,})/i);
+    if (beforeAsinM && !SKIP_LIBELLE.test(beforeAsinM[1].trim())) {
+      result.libelle = truncateLibelle(beforeAsinM[1].trim());
+    }
+  }
+
+  // Priorité 4 : scan de toutes les lignes — première ligne qui ressemble à une description
+  if (!result.libelle) {
     const candidate = lines.find(l =>
       l.length >= 15 && l.length <= 150 &&
       !/^\d/.test(l) &&
       !SKIP_LIBELLE.test(l) &&
       /[a-zA-Z\u00c0-\u00ff]{4}/.test(l)
     );
-    if (candidate) {
-      result.libelle = candidate.length > 60
-        ? candidate.slice(0, 61).replace(/\s\S*$/, '')
-        : candidate;
-    }
+    if (candidate) result.libelle = truncateLibelle(candidate);
   }
 
   // ── Devise
@@ -476,29 +481,45 @@ export default async function handler(req, res) {
     const wordCount = text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
 
     if (wordCount > 50) {
+      console.log(`[extract] Texte détecté (${wordCount} mots) → parsing heuristique`);
       data = parseInvoiceText(text);
       // Fallback vision si trop de champs critiques manquants
       if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
         const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
           + (data.lignes_tva?.length ? 0 : 1);
         if (criticalNulls >= 2) {
+          console.log(`[extract] ${criticalNulls} champs critiques manquants → fallback OpenAI Vision`);
           data = await extractWithVision(images);
+          console.log('[extract] OpenAI Vision utilisé');
+        } else {
+          console.log('[extract] OpenAI NON utilisé (champs suffisants)');
         }
+      } else {
+        console.log('[extract] OpenAI NON utilisé (pas d\'images ou clé absente)');
       }
     } else if (Array.isArray(images) && images.length > 0) {
       if (!process.env.OPENAI_API_KEY) {
         return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
       }
+      console.log('[extract] PDF scanné (texte insuffisant) → OpenAI Vision');
       data = await extractWithVision(images);
+      console.log('[extract] OpenAI Vision utilisé');
     } else if (wordCount > 0) {
+      console.log(`[extract] Texte court (${wordCount} mots) → parsing heuristique`);
       data = parseInvoiceText(text);
       // Fallback vision si trop de champs critiques manquants
       if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
         const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
           + (data.lignes_tva?.length ? 0 : 1);
         if (criticalNulls >= 2) {
+          console.log(`[extract] ${criticalNulls} champs critiques manquants → fallback OpenAI Vision`);
           data = await extractWithVision(images);
+          console.log('[extract] OpenAI Vision utilisé');
+        } else {
+          console.log('[extract] OpenAI NON utilisé (champs suffisants)');
         }
+      } else {
+        console.log('[extract] OpenAI NON utilisé (pas d\'images ou clé absente)');
       }
     } else {
       return res.status(400).json({ error: 'Aucun contenu à traiter' });
