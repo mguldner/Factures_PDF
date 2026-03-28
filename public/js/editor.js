@@ -2,6 +2,41 @@ import { invoicesContainer, confirmCheck, btnDownload, exportSection } from './d
 import { state } from './state.js';
 import { fmtDisplay } from './utils.js';
 
+// ─── Validation des champs ───────────────────────────────────────────────────
+function validateField(key, value) {
+  if (key === 'siret' && value !== null) {
+    if (!/^\d{9}$|^\d{14}$/.test(value)) return 'Format invalide (9 ou 14 chiffres uniquement)';
+  }
+  if (key === 'date' && value !== null) {
+    const m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) return 'Format invalide (JJ/MM/AAAA requis)';
+    const day = parseInt(m[1], 10), month = parseInt(m[2], 10);
+    if (day < 1 || day > 31 || month < 1 || month > 12) return 'Date invalide (jour 1-31, mois 1-12)';
+  }
+  return null;
+}
+
+function showFieldError(input, msg) {
+  const wrap = input.parentElement;
+  let errEl = wrap.querySelector('.field-error');
+  if (!errEl) {
+    errEl = document.createElement('p');
+    errEl.className = 'field-error text-xs text-red-500 mt-1';
+    wrap.appendChild(errEl);
+  }
+  errEl.textContent = msg;
+  input.classList.add('border-red-400');
+  input.classList.remove('border-blue-400');
+}
+
+function clearFieldError(input) {
+  const wrap = input.parentElement;
+  const errEl = wrap.querySelector('.field-error');
+  if (errEl) errEl.remove();
+  input.classList.remove('border-red-400');
+  input.classList.add('border-blue-400');
+}
+
 // ─── Édition inline des champs ────────────────────────────────────────────────
 function activateField(displayEl) {
   const input = displayEl.parentElement.querySelector('.editable-input');
@@ -17,6 +52,14 @@ function commitField(input) {
   const rawVal = input.type === 'number'
     ? (input.value.trim() === '' ? null : parseFloat(input.value))
     : (input.value.trim() || null);
+
+  // Validation
+  clearFieldError(input);
+  const error = validateField(key, rawVal);
+  if (error) {
+    showFieldError(input, error);
+    return;
+  }
 
   state.invoices[index][key] = rawVal;
 
@@ -46,6 +89,7 @@ function commitField(input) {
 }
 
 function cancelField(input) {
+  clearFieldError(input);
   const display = input.parentElement.querySelector('.editable-display');
   display.classList.remove('hidden');
   input.classList.add('hidden');

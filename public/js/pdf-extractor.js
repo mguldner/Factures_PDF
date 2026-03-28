@@ -60,8 +60,8 @@ export async function extractFromPDF(file, onProgress) {
 
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
 
-    // Base64 PNG (sans le préfixe data:image/png;base64,)
-    images.push(canvas.toDataURL('image/png').split(',')[1]);
+    // Base64 JPEG qualité 0.85 (payload réduit vs PNG, scale 2× conservé)
+    images.push(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
   }
 
   return { type: 'images', images, wordCount };

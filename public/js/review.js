@@ -143,3 +143,24 @@ export function renderReviewScreen() {
   btnDownload.disabled = true;
   exportSection.classList.remove('needs-reconfirm');
 }
+
+// ─── Mise en évidence des champs requis manquants ────────────────────────────
+export function highlightMissingFields(missingList) {
+  for (const { index, key } of missingList) {
+    const el = invoicesContainer.querySelector(`.editable-display[data-key="${key}"][data-index="${index}"]`);
+    if (el) {
+      el.classList.remove('border-amber-200', 'border-gray-100', 'bg-amber-50/60', 'bg-gray-50');
+      el.classList.add('border-red-300', 'bg-red-50/60', 'missing-required');
+    }
+  }
+}
+
+export function clearMissingHighlights() {
+  invoicesContainer.querySelectorAll('.editable-display.missing-required').forEach(el => {
+    el.classList.remove('missing-required', 'border-red-300', 'bg-red-50/60');
+    // Rétablir la couleur selon que la valeur est vide ou non
+    const span = el.querySelector('span');
+    const isEmpty = span?.classList.contains('text-amber-400');
+    el.classList.add(isEmpty ? 'border-amber-200' : 'border-gray-100', isEmpty ? 'bg-amber-50/60' : 'bg-gray-50');
+  });
+}

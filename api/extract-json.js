@@ -5,6 +5,17 @@ export const config = {
   api: { bodyParser: { sizeLimit: '25mb' } },
 };
 
+// ─── Stripe session cache (TTL 24h, module-level) ────────────────────────────
+const _stripeCache = new Map();
+function getStripeCache(sessionId) {
+  const e = _stripeCache.get(sessionId);
+  if (!e || Date.now() > e.exp) { _stripeCache.delete(sessionId); return null; }
+  return e.val;
+}
+function setStripeCache(sessionId, val) {
+  _stripeCache.set(sessionId, { val, exp: Date.now() + 24 * 60 * 60 * 1000 });
+}
+
 // ─── Auth helpers ────────────────────────────────────────────────────────────
 
 function decodeToken(token) {
@@ -15,6 +26,8 @@ function decodeToken(token) {
   }
 }
 
+const FREE_TRIAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 function verifyFreeTrialToken(token, secret) {
   const decoded = decodeToken(token);
   if (!decoded) return null;
@@ -23,6 +36,7 @@ function verifyFreeTrialToken(token, secret) {
   const expected = crypto.createHmac('sha256', secret)
     .update(`${userId}:${credits}:${timestamp}`).digest('hex');
   if (sig !== expected) return null;
+  if (Date.now() - timestamp > FREE_TRIAL_TTL_MS) return { expired: true };
   return { userId, credits, timestamp };
 }
 
@@ -60,7 +74,8 @@ const FR_TVA_RATES = [20, 10, 5.5, 2.1, 0];
 
 function snapTvaRate(rate) {
   if (rate === null || rate === undefined) return null;
-  return FR_TVA_RATES.reduce((best, r) => Math.abs(r - rate) < Math.abs(best - rate) ? r : best);
+  const best = FR_TVA_RATES.reduce((best, r) => Math.abs(r - rate) < Math.abs(best - rate) ? r : best);
+  return Math.abs(best - rate) <= 0.5 ? best : rate;
 }
 
 /**
@@ -248,11 +263,11 @@ async function extractWithVision(images) {
 
   const imageContent = images.map(b64 => ({
     type: 'image_url',
-    image_url: { url: `data:image/png;base64,${b64}`, detail: 'high' },
+    image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' },
   }));
 
   const { choices } = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     messages: [
       {
         role: 'user',
@@ -279,7 +294,7 @@ Les montants sont des nombres décimaux avec point (ex: 1234.56). La devise est 
         ],
       },
     ],
-    max_tokens: 800,
+    max_tokens: 1500,
   });
 
   const content = choices[0].message.content.trim();
@@ -339,20 +354,27 @@ export default async function handler(req, res) {
     if (!tokenData) {
       return res.status(401).json({ error: 'Token invalide ou expiré', code: 'INVALID_TOKEN' });
     }
+    if (tokenData.expired) {
+      return res.status(401).json({ error: 'Essais gratuits expirés', code: 'EXPIRED_TOKEN' });
+    }
     newToken = makeToken(tokenData.userId, tokenData.credits - 1, tokenData.timestamp, secret);
 
   } else if (authType === 'paid') {
-    // Vérification Stripe (pas de cache cross-instances en serverless)
     if (!authToken) return res.status(401).json({ error: 'Session ID manquant' });
-    try {
-      const { default: Stripe } = await import('stripe');
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-      const session = await stripe.checkout.sessions.retrieve(authToken);
-      if (session.payment_status !== 'paid') {
-        return res.status(401).json({ error: 'Paiement non confirmé', code: 'UNPAID' });
+    const cached = getStripeCache(authToken);
+    if (cached !== null) {
+      if (!cached.paid) return res.status(401).json({ error: 'Paiement non confirmé', code: 'UNPAID' });
+    } else {
+      try {
+        const { default: Stripe } = await import('stripe');
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+        const session = await stripe.checkout.sessions.retrieve(authToken);
+        const paid = session.payment_status === 'paid';
+        setStripeCache(authToken, { paid });
+        if (!paid) return res.status(401).json({ error: 'Paiement non confirmé', code: 'UNPAID' });
+      } catch (err) {
+        return res.status(401).json({ error: 'Impossible de vérifier le paiement', code: 'VERIFY_FAILED' });
       }
-    } catch (err) {
-      return res.status(401).json({ error: 'Impossible de vérifier le paiement', code: 'VERIFY_FAILED' });
     }
 
   } else {
@@ -366,6 +388,14 @@ export default async function handler(req, res) {
 
     if (wordCount > 50) {
       data = parseInvoiceText(text);
+      // Fallback vision si trop de champs critiques manquants
+      if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
+        const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
+          + (data.lignes_tva?.length ? 0 : 1);
+        if (criticalNulls >= 2) {
+          data = await extractWithVision(images);
+        }
+      }
     } else if (Array.isArray(images) && images.length > 0) {
       if (!process.env.OPENAI_API_KEY) {
         return res.status(503).json({ error: 'OCR non configuré (OPENAI_API_KEY manquant)' });
@@ -373,8 +403,22 @@ export default async function handler(req, res) {
       data = await extractWithVision(images);
     } else if (wordCount > 0) {
       data = parseInvoiceText(text);
+      // Fallback vision si trop de champs critiques manquants
+      if (Array.isArray(images) && images.length > 0 && process.env.OPENAI_API_KEY) {
+        const criticalNulls = ['date', 'fournisseur', 'montant_ttc'].filter(k => data[k] === null).length
+          + (data.lignes_tva?.length ? 0 : 1);
+        if (criticalNulls >= 2) {
+          data = await extractWithVision(images);
+        }
+      }
     } else {
       return res.status(400).json({ error: 'Aucun contenu à traiter' });
+    }
+
+    // Validation SIRET : doit faire exactement 9 ou 14 chiffres
+    if (data.siret) {
+      const digits = String(data.siret).replace(/\D/g, '');
+      if (digits.length !== 9 && digits.length !== 14) data.siret = null;
     }
 
     res.json({
